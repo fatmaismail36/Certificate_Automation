@@ -1,151 +1,158 @@
+from pathlib import Path
+
 import pandas as pd
 
 
 def save_log(log_file, rows):
-
     """
-    Save sending results to CSV.
-
-    If the log file already exists,
-    append the new results to it.
+    Append new log records to the CSV file.
     """
-
     if not rows:
-
         return
 
-    new_log = pd.DataFrame(rows)
+    log_file = Path(log_file)
+    log_file.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    new_data = pd.DataFrame(rows)
 
     if log_file.exists():
-
         try:
-
-            old_log = pd.read_csv(
+            existing_data = pd.read_csv(
                 log_file
             )
-
-            new_log = pd.concat(
-                [
-                    old_log,
-                    new_log
-                ],
+            combined_data = pd.concat(
+                [existing_data, new_data],
                 ignore_index=True
             )
-
         except Exception:
+            combined_data = new_data
+    else:
+        combined_data = new_data
 
-            pass
-
-    new_log.to_csv(
+    combined_data.to_csv(
         log_file,
-        index=False,
-        encoding="utf-8-sig"
-    )
-
-    print()
-
-    print(
-        f"Log saved to: {log_file}"
+        index=False
     )
 
 
-def get_sent_rows(log_file):
-
+def get_sent_recipients(log_file):
     """
-    Return Excel row numbers that were successfully sent.
+    Return recipients that were successfully sent.
 
-    IMPORTANT:
+    Identity is based on:
+        Name + Email + Certificate
 
-    We only consider SENT records.
-
-    READY, FAILED and SKIPPED are NOT considered sent.
+    NOT only row_number.
+    This makes resume safer if the Excel rows move.
     """
+    log_file = Path(log_file)
 
     if not log_file.exists():
-
         return set()
 
     try:
-
-        log_df = pd.read_csv(
-            log_file
-        )
-
+        df = pd.read_csv(log_file)
     except Exception:
-
         return set()
 
-    if log_df.empty:
-
+    if df.empty:
         return set()
 
-    if "status" not in log_df.columns:
-
-        return set()
-
-    if "row_number" not in log_df.columns:
-
-        return set()
-
-    sent_df = log_df[
-        log_df["status"] == "SENT"
+    required_columns = [
+        "name",
+        "email",
+        "certificate",
+        "status"
     ]
 
-    sent_rows = set()
+    for column in required_columns:
+        if column not in df.columns:
+            return set()
 
-    for row_number in sent_df[
-        "row_number"
-    ]:
+    sent_df = df[
+        df["status"]
+        .astype(str)
+        .str.upper()
+        .eq("SENT")
+    ]
 
-        try:
+    sent_recipients = set()
 
-            sent_rows.add(
-                int(row_number)
+    for _, row in sent_df.iterrows():
+        name = str(
+            row["name"]
+        )
+        email = str(
+            row["email"]
+        ).strip().lower()
+        certificate = str(
+            row["certificate"]
+        )
+
+        sent_recipients.add(
+            (
+                name,
+                email,
+                certificate
             )
+        )
 
-        except (ValueError, TypeError):
+    return sent_recipients
 
-            pass
 
-    return sent_rows
+def is_already_sent(
+    log_file,
+    name,
+    email,
+    certificate
+):
+    """
+    Check whether this exact recipient +
+    certificate combination was already sent.
+    """
+    sent_recipients = get_sent_recipients(
+        log_file
+    )
+
+    key = (
+        name,
+        str(email).strip().lower(),
+        certificate
+    )
+
+    return key in sent_recipients
 
 
 def show_resume_status(
     log_file,
     total_recipients
 ):
-
     """
-    Display how many recipients were already sent.
+    Show sending resume information.
     """
-
-    sent_rows = get_sent_rows(
+    sent_recipients = get_sent_recipients(
         log_file
     )
 
-    already_sent = len(
-        sent_rows
-    )
+    sent_count = len(sent_recipients)
 
-    remaining = (
-        total_recipients
-        - already_sent
+    remaining = max(
+        total_recipients - sent_count,
+        0
     )
 
     print()
-
     print("========================================")
-
     print("RESUME STATUS")
-
     print("========================================")
-
     print(
-        f"Already sent: {already_sent}"
+        f"Already sent: {sent_count}"
     )
-
     print(
         f"Remaining: {remaining}"
     )
 
-    return sent_rows
+    return sent_recipients
